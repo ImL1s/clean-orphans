@@ -1,11 +1,37 @@
 #!/bin/bash
 
-echo "🔍 Scanning for orphaned development processes..."
+# 1. 參數解析
+DRY_RUN=false
+DEEP=false
 
-# 1. 作業系統偵測
+usage() {
+    echo "Usage: clean-orphans [OPTIONS]"
+    echo ""
+    echo "Safely kill orphaned development processes (PPID=1) to reclaim memory."
+    echo ""
+    echo "Options:"
+    echo "  --deep      Also kill heavy background daemons (Gradle, Kotlin LSP, iOS Simulators)"
+    echo "              ⚠️  May interrupt active builds — use --dry-run first to preview"
+    echo "  --dry-run   Show what would be killed without actually killing anything"
+    echo "  -h, --help  Show this help message"
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        --deep)    DEEP=true ;;
+        --dry-run) DRY_RUN=true ;;
+        -h|--help) usage; exit 0 ;;
+        *) echo "Unknown option: $arg"; usage; exit 1 ;;
+    esac
+done
+
+echo "🔍 Scanning for orphaned development processes..."
+$DRY_RUN && echo "  (dry-run mode: no processes will be killed)"
+
+# 2. 作業系統偵測
 OS="$(uname -s)"
 
-# 2. 定義通用的孤兒進程特徵 (可輕易擴充)
+# 3. 定義通用的孤兒進程特徵 (可輕易擴充)
 # 包含常見的現代 AI 開發工具 (MCP)、前端工具與跨平台開發工具
 ORPHAN_PATTERNS=(
   # AI & MCP Servers (Common)
@@ -23,34 +49,97 @@ ORPHAN_PATTERNS=(
 # 將陣列組合成正則表達式字串
 REGEX_PATTERN=$(IFS="|"; echo "${ORPHAN_PATTERNS[*]}")
 
-# 3. 尋找安全的孤兒進程 (PPID=1)
+# 4. 通用函式
+
+# 計算並回報進程統計（不執行 kill）
+report_stats() {
+    local PIDS="$1"
+    local LABEL="$2"
+
+    if [ -z "$PIDS" ]; then
+        echo "✅ No $LABEL found."
+        return 1
+    fi
+
+    # ps -o rss= 取得記憶體 (KB)，在 Linux 與 macOS 皆可運作
+    local STATS
+    STATS=$(ps -o rss= -p $PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
+    local COUNT="${STATS%%|*}"
+    local MEM="${STATS##*|}"
+
+    echo "🔪 Killing $COUNT $LABEL (Reclaiming ~$MEM MB)..."
+    return 0
+}
+
+# 送出 SIGTERM，等待最多 2 秒，對未退出的進程送 SIGKILL
+graceful_kill() {
+    local PIDS="$1"
+    [ -z "$PIDS" ] && return
+
+    if $DRY_RUN; then
+        echo "   → would kill PIDs: $PIDS"
+        return
+    fi
+
+    # SIGTERM 先禮貌請求退出
+    echo "$PIDS" | xargs kill 2>/dev/null
+
+    # 等待最多 2 秒讓進程自行退出
+    local waited=0
+    while [ $waited -lt 4 ]; do
+        local remaining=""
+        for pid in $PIDS; do
+            kill -0 "$pid" 2>/dev/null && remaining="$remaining $pid"
+        done
+        remaining=$(echo "$remaining" | xargs)
+        [ -z "$remaining" ] && return
+        sleep 0.5
+        waited=$((waited + 1))
+    done
+
+    # 頑固進程用 SIGKILL 強制終結
+    if [ -n "$remaining" ]; then
+        echo "   ⚡ Force killing unresponsive PIDs: $remaining"
+        echo "$remaining" | xargs kill -9 2>/dev/null
+    fi
+}
+
+# 計算統計 + 優雅終結進程
+kill_and_report() {
+    local PIDS="$1"
+    local LABEL="$2"
+    report_stats "$PIDS" "$LABEL" && graceful_kill "$PIDS"
+}
+
+# 用關鍵字搜尋並清理進程（用於深度清理）
+# 使用 pgrep -f 取代 ps|grep 管線，避免自身匹配問題
+cleanup_by_name() {
+    local label="$1"
+    local pattern="$2"
+    local PIDS
+    PIDS=$(pgrep -f "$pattern" 2>/dev/null | xargs)
+    kill_and_report "$PIDS" "$label processes"
+}
+
+# 只清理孤兒進程 (PPID=1)，用於可能正在活躍使用的工具（如 xcodebuild）
+cleanup_orphaned_by_name() {
+    local label="$1"
+    local pattern="$2"
+    local PIDS
+    PIDS=$(pgrep -P 1 -f "$pattern" 2>/dev/null | xargs)
+    kill_and_report "$PIDS" "$label processes"
+}
+
+# 5. 尋找安全的孤兒進程 (PPID=1)
 ORPHAN_PIDS=$(ps -eo ppid,pid,command | grep -E "$REGEX_PATTERN" | grep -v grep | awk '$1 == 1 {print $2}')
-# 針對特定常常殘留的命令 (例如 adb logcat)
-ADB_PIDS=$(ps aux | grep -E 'adb.*logcat' | grep -v grep | awk '{print $2}')
+# adb logcat 也只清理孤兒 (PPID=1)，避免誤殺使用者主動開啟的 logcat
+ADB_PIDS=$(ps -eo ppid,pid,command | grep -E 'adb.*logcat' | grep -v grep | awk '$1 == 1 {print $2}')
 
 # 合併需要安全清理的 PID
 PIDS_TO_KILL=""
 [ -n "$ORPHAN_PIDS" ] && PIDS_TO_KILL="$ORPHAN_PIDS"
 [ -n "$ADB_PIDS" ] && PIDS_TO_KILL="$PIDS_TO_KILL $ADB_PIDS"
 PIDS_TO_KILL=$(echo "$PIDS_TO_KILL" | xargs)
-
-# 通用計算與清理函式，相容 macOS (Darwin) 與 Linux 
-kill_and_report() {
-    local PIDS=$1
-    local LABEL=$2
-    
-    if [ -n "$PIDS" ]; then
-        # ps -o rss= 取得記憶體 (KB)，在 Linux 與 macOS 皆可運作
-        local STATS=$(ps -o rss= -p $PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
-        local COUNT=$(echo "$STATS" | cut -d'|' -f1)
-        local MEM=$(echo "$STATS" | cut -d'|' -f2)
-        
-        echo "🔪 Killing $COUNT $LABEL (Reclaiming ~$MEM MB)..."
-        echo "$PIDS" | xargs kill 2>/dev/null
-    else
-        echo "✅ No $LABEL found."
-    fi
-}
 
 if [ -n "$PIDS_TO_KILL" ]; then
     kill_and_report "$PIDS_TO_KILL" "orphaned/stale processes"
@@ -59,39 +148,30 @@ else
     echo "✅ No safe orphans found. Clean!"
 fi
 
-# 4. 深度清理模式
-if [ "$1" == "--deep" ]; then
+# 6. 深度清理模式
+if $DEEP; then
     echo ""
     echo "⚠️ Deep cleanup requested..."
-    
-    # 建立一個函式來計算和清理特定關鍵字的進程
-    cleanup_by_name() {
-        local label=$1
-        local pattern=$2
-        local PIDS=$(ps aux | grep -E "$pattern" | grep -v grep | awk '{print $2}' | xargs)
-        kill_and_report "$PIDS" "$label processes"
-    }
 
     # 跨平台通用的深度清理 (Android, Java, Flutter 等)
     cleanup_by_name "Kotlin LSP" "kotlinLsp"
     cleanup_by_name "Gradle Daemon" "org.gradle.launcher.daemon"
     cleanup_by_name "Flutter Daemon" "flutter_tools.snapshot daemon"
-    cleanup_by_name "Stuck xcodebuild" "xcodebuild"
-    
+    # xcodebuild 只殺孤兒 (PPID=1)，避免中斷正在進行的 build
+    cleanup_orphaned_by_name "Orphaned xcodebuild" "xcodebuild"
+
     # macOS 專用的 iOS 模擬器清理
     if [ "$OS" == "Darwin" ] && command -v xcrun &> /dev/null; then
-        SIM_PIDS=$(ps aux | grep -E 'CoreSimulator|Simulator.app' | grep -v grep | awk '{print $2}' | xargs)
-        if [ -n "$SIM_PIDS" ]; then
-            S_STATS=$(ps -o rss= -p $SIM_PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
-            S_COUNT=$(echo "$S_STATS" | cut -d'|' -f1)
-            S_MEM=$(echo "$S_STATS" | cut -d'|' -f2)
-            echo "🔪 Shutting down iOS Simulators ($S_COUNT processes, Reclaiming ~$S_MEM MB)..."
-            xcrun simctl shutdown all 2>/dev/null
-        else
-            echo "✅ No iOS Simulator processes found."
+        SIM_PIDS=$(pgrep -f 'CoreSimulator|Simulator.app' 2>/dev/null | xargs)
+        if report_stats "$SIM_PIDS" "iOS Simulator processes"; then
+            if ! $DRY_RUN; then
+                xcrun simctl shutdown all 2>/dev/null
+            else
+                echo "   → would run: xcrun simctl shutdown all"
+            fi
         fi
     fi
-    
+
     echo "✅ Deep cleanup completed."
 else
     echo ""

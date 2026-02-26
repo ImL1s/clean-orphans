@@ -1,0 +1,10 @@
+# Debug logs
+firebase-debug.log
+*.log
+
+# oh-my-claudecode local state
+.omc/
+
+# AI agent files (personal config, not part of the project)
+AGENTS.md
+GEMINI.md
