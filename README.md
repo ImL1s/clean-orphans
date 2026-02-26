@@ -40,7 +40,17 @@ Tools like Claude Code, Cursor, OpenCode, and Antigravity spawn [MCP (Model Cont
 | OpenCode | [MCP processes not terminated on session end](https://github.com/anomalyco/opencode/issues/6633) | [Zombie process accumulation](https://github.com/anomalyco/opencode/issues/11225) |
 | Antigravity | [Language server high memory consumption](https://discuss.ai.google.dev/t/solved-antigravity-hangs-due-to-language-server-windows-x64-high-memory-consumption/116025) | [Zombie processes after quit](https://antigravity.codes/blog/antigravity-server-crashed-fix); backend ports don't clear |
 
-#### 2. Flutter / Dart: SIGTERM Doesn't Reach the VM
+#### 2. Frontend Dev Servers: Ctrl+C Doesn't Always Work
+
+Webpack-dev-server is [notorious for leaving orphaned node processes](https://github.com/webpack/webpack-dev-server/issues/1201) after Ctrl+C. The [child process cannot be killed](https://github.com/webpack/webpack-dev-server/issues/5026) when spawned via `child_process`, and if the parent exits, the dev server continues running. Similar issues affect Vite, Next.js dev server, and other frontend tooling.
+
+| Tool | Issue | Impact |
+|------|-------|--------|
+| webpack-dev-server | [Orphaned node.exe processes](https://github.com/webpack/webpack-dev-server/issues/1201) | Port occupied, node process lingers |
+| webpack-dev-server | [Child process cannot be killed](https://github.com/webpack/webpack-dev-server/issues/5026) | Parent exit doesn't terminate server |
+| Vue/webpack | [Dev server continues after Ctrl+C](https://github.com/vuejs-templates/webpack/issues/802) | Needs manual kill |
+
+#### 3. Flutter / Dart: SIGTERM Doesn't Reach the VM (Mobile)
 
 The `flutter` command is a shell script wrapper. When IDE sends SIGTERM on shutdown, the signal hits the shell process but [doesn't propagate to the underlying Dart VM](https://github.com/Dart-Code/Dart-Code/issues/5155). The VM process becomes orphaned while the shell exits cleanly.
 
@@ -51,7 +61,7 @@ The Flutter daemon also [spawns sub-processes like `xcdevice observe`](https://g
 | Flutter / Dart | [Daemon orphaned when IDE closes](https://github.com/Dart-Code/Dart-Code/issues/5216) | SIGTERM [doesn't propagate](https://github.com/Dart-Code/Dart-Code/issues/5155) through shell wrapper |
 | Flutter | [`xcdevice observe` leaked by daemon](https://github.com/flutter/flutter/issues/73859) | Orphaned sub-processes pile up |
 
-#### 3. Gradle: Daemon Multiplication
+#### 4. Gradle: Daemon Multiplication
 
 Gradle daemons are designed to stay alive for performance. But a [new daemon is spawned whenever JVM args, Java version, or Gradle version differ](https://docs.gradle.org/current/userguide/gradle_daemon.html) between builds. Multi-project setups with Kotlin can spawn [3+ Kotlin daemons](https://github.com/gradle/gradle/issues/34755), each consuming 1 GB+ of heap. The built-in 3-hour idle timeout is far too long for developer machines.
 
@@ -60,7 +70,7 @@ Gradle daemons are designed to stay alive for performance. But a [new daemon is 
 | Gradle Daemon | [Multiple instances exhaust memory](https://discuss.gradle.org/t/tons-of-gradle-daemons-exhausting-memory/20579) | Config mismatches spawn duplicates |
 | Kotlin Daemon | [Excessive memory usage](https://github.com/gradle/gradle/issues/34755) | 3+ daemons × 1 GB+ each |
 
-#### 4. iOS Simulators: Silent Memory Hogs
+#### 5. iOS Simulators: Silent Memory Hogs
 
 CoreSimulator processes from previous Xcode sessions [linger in the background](https://www.repeato.app/managing-xcodes-coresimulator-devices-folder-a-practical-guide/) because Xcode [has no idea what you still need](https://developer.apple.com/forums/thread/758703) and won't clean them up for you. They collectively consume **10-20+ GB**.
 
@@ -73,6 +83,7 @@ CoreSimulator processes from previous Xcode sessions [linger in the background](
 | **Orphan detection** (`PPID=1`) | Only kills processes whose parent has died — the defining trait of a leaked process | Yes — active IDE/terminal children always have a living parent |
 | **Pattern matching** | Targets known offenders via `ORPHAN_PATTERNS` regex array, not blanket process killing | Yes — only matches specific tool signatures |
 | **`pgrep` over `ps\|grep`** | Uses `pgrep -f` to avoid self-matching and reduce false positives | Yes |
+| **Frontend dev servers** | Catches orphaned webpack-dev-server, vite, next.js, esbuild, turbopack processes | Yes — only PPID=1 orphans |
 | **Graceful termination** | SIGTERM → 2s wait → SIGKILL only for unresponsive processes | Yes — gives processes time to save state |
 | **Deep mode separation** | Heavy daemons (Gradle, Kotlin LSP) require explicit `--deep` flag; `xcodebuild` further restricted to orphans only | Yes — opt-in, never surprises |
 | **Dry-run** | `--dry-run` previews everything without killing | N/A — read-only |

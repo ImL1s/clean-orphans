@@ -22,7 +22,7 @@ Single-file script (`clean-orphans`) with this flow:
 
 1. **Argument parsing** — Supports `--deep`, `--dry-run`, `--help`; flags are combinable in any order
 2. **OS detection** — `uname -s` to distinguish Darwin/Linux
-3. **Pattern matching** — `ORPHAN_PATTERNS` array defines regex patterns for targetable processes (MCP servers, Node wrappers, Dart/Flutter tooling, iOS logging)
+3. **Pattern matching** — `ORPHAN_PATTERNS` array defines regex patterns for targetable processes (MCP servers, Node wrappers, frontend dev servers, Dart/Flutter tooling, iOS logging)
 4. **Safe cleanup** — Finds processes matching patterns with `PPID=1`, plus orphaned `adb logcat`; kills via `kill_and_report()`
 5. **Deep cleanup** (`--deep`) — `cleanup_by_name()` targets non-orphaned heavy daemons (Kotlin LSP, Gradle, Flutter daemon); `cleanup_orphaned_by_name()` for xcodebuild (PPID=1 only); macOS-specific `xcrun simctl shutdown all` for iOS Simulators
 

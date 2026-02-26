@@ -36,10 +36,12 @@ OS="$(uname -s)"
 ORPHAN_PATTERNS=(
   # AI & MCP Servers (Common)
   "mcp-server|playwright-mcp"
-  # AI & MCP Servers (Personal / Custom)
+  # AI & MCP Servers (Personal / Custom — remove or replace with your own)
   "context7|mobile-mcp"
-  # Node.js Wrappers
+  # Node.js Wrappers (MCP related)
   "npm exec @playwright|npm exec @mobilenext|npm exec @upstash"
+  # Frontend Dev Servers (webpack, vite, next.js, esbuild, turbopack)
+  "webpack-dev-server|vite.*--host|next-server|next dev|esbuild.*--serve|turbopack"
   # Dart & Flutter Tooling
   "flutter_tester|dart.*(tooling-daemon|devtools --machine|development-service)"
   # iOS Logging

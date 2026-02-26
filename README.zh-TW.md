@@ -40,7 +40,17 @@ Claude Code、Cursor、OpenCode、Antigravity 等工具會以子進程方式啟�
 | OpenCode | [工作階段結束時 MCP 進程未終止](https://github.com/anomalyco/opencode/issues/6633) | [殭屍進程累積](https://github.com/anomalyco/opencode/issues/11225) |
 | Antigravity | [Language server 高記憶體消耗](https://discuss.ai.google.dev/t/solved-antigravity-hangs-due-to-language-server-windows-x64-high-memory-consumption/116025) | [退出後殭屍進程殘留](https://antigravity.codes/blog/antigravity-server-crashed-fix)；背景端口未釋放 |
 
-#### 2. Flutter / Dart：SIGTERM 無法到達 VM
+#### 2. 前端 Dev Server：Ctrl+C 不一定有用
+
+webpack-dev-server [以留下孤兒 node 進程聞名](https://github.com/webpack/webpack-dev-server/issues/1201)，Ctrl+C 後 node 進程不會死。用 `child_process` 產生的 [子進程無法被 kill](https://github.com/webpack/webpack-dev-server/issues/5026)，父進程退出後 dev server 繼續跑。Vite、Next.js dev server 等前端工具也有類似問題。
+
+| 工具 | 問題 | 影響 |
+|------|------|------|
+| webpack-dev-server | [孤兒 node 進程](https://github.com/webpack/webpack-dev-server/issues/1201) | 佔用端口，node 進程殘留 |
+| webpack-dev-server | [子進程無法被 kill](https://github.com/webpack/webpack-dev-server/issues/5026) | 父進程退出不會終止 server |
+| Vue/webpack | [Ctrl+C 後 dev server 繼續跑](https://github.com/vuejs-templates/webpack/issues/802) | 需要手動 kill |
+
+#### 3. Flutter / Dart：SIGTERM 無法到達 VM（行動開發）
 
 `flutter` 命令實際上是一個 shell 腳本包裝器。IDE 關閉時發送的 SIGTERM 只到達 shell 進程，[無法傳遞到底層的 Dart VM](https://github.com/Dart-Code/Dart-Code/issues/5155)。shell 正常退出，但 VM 進程變成孤兒。
 
@@ -51,7 +61,7 @@ Flutter daemon 也會[產生 `xcdevice observe` 等子進程](https://github.com
 | Flutter / Dart | [IDE 關閉後 daemon 變成孤兒](https://github.com/Dart-Code/Dart-Code/issues/5216) | SIGTERM [無法穿透](https://github.com/Dart-Code/Dart-Code/issues/5155) shell 包裝層 |
 | Flutter | [daemon 洩漏 `xcdevice observe`](https://github.com/flutter/flutter/issues/73859) | 孤兒子進程持續累積 |
 
-#### 3. Gradle：Daemon 不斷繁殖
+#### 4. Gradle：Daemon 不斷繁殖
 
 Gradle daemon 設計上會常駐以加速建置。但只要 JVM 參數、Java 版本或 Gradle 版本有差異，就會[產生新的 daemon](https://docs.gradle.org/current/userguide/gradle_daemon.html)。多專案 Kotlin 環境可能會[產生 3 個以上 Kotlin daemon](https://github.com/gradle/gradle/issues/34755)，每個佔 1 GB+ heap。內建的 3 小時閒置超時對開發機來說太長了。
 
@@ -60,7 +70,7 @@ Gradle daemon 設計上會常駐以加速建置。但只要 JVM 參數、Java �
 | Gradle Daemon | [多實例耗盡記憶體](https://discuss.gradle.org/t/tons-of-gradle-daemons-exhausting-memory/20579) | 設定不匹配就產生副本 |
 | Kotlin Daemon | [過度記憶體使用](https://github.com/gradle/gradle/issues/34755) | 3+ daemon × 每個 1 GB+ |
 
-#### 4. iOS 模擬器：沉默的記憶體黑洞
+#### 5. iOS 模擬器：沉默的記憶體黑洞
 
 前一次 Xcode 工作階段的 CoreSimulator 進程會[殘留在背景](https://www.repeato.app/managing-xcodes-coresimulator-devices-folder-a-practical-guide/)，因為 Xcode [無法判斷你還需要什麼](https://developer.apple.com/forums/thread/758703)，不會主動清理。合計可佔用 **10-20+ GB**。
 
@@ -73,6 +83,7 @@ Gradle daemon 設計上會常駐以加速建置。但只要 JVM 參數、Java �
 | **孤兒偵測** (`PPID=1`) | 只殺父進程已死的進程——洩漏進程的定義特徵 | 安全 — 活躍的 IDE/終端子進程永遠有存活的父進程 |
 | **正則比對** | 用 `ORPHAN_PATTERNS` 陣列比對已知的問題工具，不是盲目殺進程 | 安全 — 只比對特定工具簽名 |
 | **`pgrep` 取代 `ps\|grep`** | 使用 `pgrep -f` 避免自身匹配和誤判 | 安全 |
+| **前端 dev server** | 捕捉孤兒 webpack-dev-server、vite、next.js、esbuild、turbopack 進程 | 安全 — 只清 PPID=1 孤兒 |
 | **優雅終結** | SIGTERM → 等 2 秒 → 只對無回應的進程使用 SIGKILL | 安全 — 給進程儲存狀態的時間 |
 | **深度模式分離** | 重型 daemon（Gradle、Kotlin LSP）需要明確的 `--deep` 旗標；xcodebuild 更進一步限制只殺孤兒 | 安全 — 需主動選擇，不會意外觸發 |
 | **預覽模式** | `--dry-run` 預覽所有動作但不執行 | 不適用 — 只讀 |
