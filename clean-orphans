@@ -8,9 +8,15 @@ OS="$(uname -s)"
 # 2. 定義通用的孤兒進程特徵 (可輕易擴充)
 # 包含常見的現代 AI 開發工具 (MCP)、前端工具與跨平台開發工具
 ORPHAN_PATTERNS=(
-  "mcp-server|playwright-mcp|context7|mobile-mcp"
+  # AI & MCP Servers (Common)
+  "mcp-server|playwright-mcp"
+  # AI & MCP Servers (Personal / Custom)
+  "context7|mobile-mcp"
+  # Node.js Wrappers
   "npm exec @playwright|npm exec @mobilenext|npm exec @upstash"
+  # Dart & Flutter Tooling
   "flutter_tester|dart.*(tooling-daemon|devtools --machine|development-service)"
+  # iOS Logging
   "log stream.*Runner"
 )
 
