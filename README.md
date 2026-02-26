@@ -14,11 +14,14 @@ When IDEs crash, terminals close unexpectedly, or AI development agents stop, th
 
 Instead of manually hunting them down in Activity Monitor or restarting your computer, `clean-orphans` safely sweeps them away in milliseconds.
 
-### Targets Include:
+### 🎯 Targets Include:
 - 🤖 **AI & MCP Servers:** `playwright-mcp`, `mcp-server`, custom tools (`context7`, `mobile-mcp`).
 - 📱 **Mobile Dev Tooling:** Stuck `flutter_tester`, Dart tooling daemons, and stale `adb logcat` streams.
 - 📦 **Node Wrappers:** Orphaned `npm exec` processes.
-- 💥 **Deep Clean (Optional):** Gigabyte-heavy daemons like Gradle (`org.gradle.launcher.daemon`), Kotlin LSP, xcodebuild, and iOS Simulators.
+- 💥 **Deep Clean Targets:** Gigabyte-heavy daemons like Gradle (`org.gradle.launcher.daemon`), Kotlin LSP, xcodebuild, and iOS Simulators.
+
+### 🛡️ Graceful Termination
+The script doesn't just blindly destroy processes. It sends a polite `SIGTERM` first, waits up to 2 seconds for processes to shut down gracefully, and only uses a forceful `SIGKILL` (`-9`) for stubborn, unresponsive processes.
 
 ---
 
@@ -39,7 +42,7 @@ cd clean-orphans
 
 ---
 
-## 🛠️ Usage
+## 🛠️ Usage & Options
 
 ### 1. Safe Mode (Default)
 Safe mode ONLY targets detached, orphaned tools (`PPID=1`). **It is 100% safe to run anytime.** It will never kill processes attached to an active terminal or IDE.
@@ -47,37 +50,35 @@ Safe mode ONLY targets detached, orphaned tools (`PPID=1`). **It is 100% safe to
 ```bash
 clean-orphans
 ```
-*Output Example:*
-```text
-🔍 Scanning for orphaned development processes...
-🔪 Killing 3 orphaned/stale processes (Reclaiming ~45.50 MB)...
-✅ Safe orphans cleaned.
-💡 Tip: Run 'clean-orphans --deep' to also kill heavy background processes like Gradle, Kotlin LSP, and iOS Simulators.
-```
 
-### 2. Deep Clean Mode (Aggressive)
-When you feel your system lagging, use the `--deep` flag. This will safely shut down heavy background daemons that aren't technically orphaned but can consume GBs of RAM when idle. *(Don't worry, tools like Gradle will automatically restart on your next build).*
+### 2. Deep Clean Mode (`--deep`)
+When you feel your system lagging, use the `--deep` flag. This will safely shut down heavy background daemons that aren't technically orphaned but can consume GBs of RAM when idle. *(Tools like Gradle will automatically restart on your next build).*
 
 ```bash
 clean-orphans --deep
 ```
-*Output Example:*
-```text
-🔍 Scanning for orphaned development processes...
-✅ No safe orphans found. Clean!
 
-⚠️ Deep cleanup requested...
-🔪 Killing 2 Kotlin LSP processes (Reclaiming ~4120.00 MB)...
-🔪 Killing 1 Gradle Daemon processes (Reclaiming ~1200.50 MB)...
-🔪 Shutting down iOS Simulators (330 processes, Reclaiming ~14319.00 MB)...
-✅ Deep cleanup completed.
+### 3. Dry Run Mode (`--dry-run`)
+Want to see what the script *would* kill without actually terminating anything? Use the dry-run flag. This is great for auditing exactly how much memory you could reclaim.
+
+```bash
+clean-orphans --dry-run
+# or test both
+clean-orphans --deep --dry-run
+```
+
+### 4. Help (`-h`, `--help`)
+Display the built-in help menu.
+
+```bash
+clean-orphans --help
 ```
 
 ---
 
-## 🛠️ Customization
+## ⚙️ Customization
 
-Want to add your own custom tools to the cleanup list? Open `clean-orphans` and add your regex pattern to the `ORPHAN_PATTERNS` array:
+Want to add your own custom tools to the cleanup list? Open the `clean-orphans` script and add your regex pattern to the `ORPHAN_PATTERNS` array:
 
 ```bash
 ORPHAN_PATTERNS=(
