@@ -2,8 +2,24 @@
 
 echo "🔍 Scanning for orphaned development processes..."
 
-# 1. 尋找安全的孤兒進程 (PPID=1)
-ORPHAN_PIDS=$(ps -eo ppid,pid,command | grep -E 'playwright-mcp|run-driver|context7|mobile-mcp|npm exec @playwright|npm exec @mobilenext|npm exec @upstash|flutter_tester|dart.*(tooling-daemon|devtools --machine|development-service)|log stream.*Runner' | grep -v grep | awk '$1 == 1 {print $2}')
+# 1. 作業系統偵測
+OS="$(uname -s)"
+
+# 2. 定義通用的孤兒進程特徵 (可輕易擴充)
+# 包含常見的現代 AI 開發工具 (MCP)、前端工具與跨平台開發工具
+ORPHAN_PATTERNS=(
+  "mcp-server|playwright-mcp|context7|mobile-mcp"
+  "npm exec @playwright|npm exec @mobilenext|npm exec @upstash"
+  "flutter_tester|dart.*(tooling-daemon|devtools --machine|development-service)"
+  "log stream.*Runner"
+)
+
+# 將陣列組合成正則表達式字串
+REGEX_PATTERN=$(IFS="|"; echo "${ORPHAN_PATTERNS[*]}")
+
+# 3. 尋找安全的孤兒進程 (PPID=1)
+ORPHAN_PIDS=$(ps -eo ppid,pid,command | grep -E "$REGEX_PATTERN" | grep -v grep | awk '$1 == 1 {print $2}')
+# 針對特定常常殘留的命令 (例如 adb logcat)
 ADB_PIDS=$(ps aux | grep -E 'adb.*logcat' | grep -v grep | awk '{print $2}')
 
 # 合併需要安全清理的 PID
@@ -12,49 +28,52 @@ PIDS_TO_KILL=""
 [ -n "$ADB_PIDS" ] && PIDS_TO_KILL="$PIDS_TO_KILL $ADB_PIDS"
 PIDS_TO_KILL=$(echo "$PIDS_TO_KILL" | xargs)
 
-if [ -n "$PIDS_TO_KILL" ]; then
-    STATS=$(ps -o rss= -p $PIDS_TO_KILL 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
-    COUNT=$(echo "$STATS" | cut -d'|' -f1)
-    MEM=$(echo "$STATS" | cut -d'|' -f2)
+# 通用計算與清理函式，相容 macOS (Darwin) 與 Linux 
+kill_and_report() {
+    local PIDS=$1
+    local LABEL=$2
     
-    echo "🔪 Killing $COUNT orphaned/stale processes (Reclaiming ~$MEM MB)..."
-    echo "$PIDS_TO_KILL" | xargs kill 2>/dev/null
+    if [ -n "$PIDS" ]; then
+        # ps -o rss= 取得記憶體 (KB)，在 Linux 與 macOS 皆可運作
+        local STATS=$(ps -o rss= -p $PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
+        local COUNT=$(echo "$STATS" | cut -d'|' -f1)
+        local MEM=$(echo "$STATS" | cut -d'|' -f2)
+        
+        echo "🔪 Killing $COUNT $LABEL (Reclaiming ~$MEM MB)..."
+        echo "$PIDS" | xargs kill 2>/dev/null
+    else
+        echo "✅ No $LABEL found."
+    fi
+}
+
+if [ -n "$PIDS_TO_KILL" ]; then
+    kill_and_report "$PIDS_TO_KILL" "orphaned/stale processes"
     echo "✅ Safe orphans cleaned."
 else
     echo "✅ No safe orphans found. Clean!"
 fi
 
-# 2. 深度清理模式
+# 4. 深度清理模式
 if [ "$1" == "--deep" ]; then
     echo ""
     echo "⚠️ Deep cleanup requested..."
     
     # 建立一個函式來計算和清理特定關鍵字的進程
     cleanup_by_name() {
-        local name=$1
-        local label=$2
-        local pattern=$3
-        
+        local label=$1
+        local pattern=$2
         local PIDS=$(ps aux | grep -E "$pattern" | grep -v grep | awk '{print $2}' | xargs)
-        if [ -n "$PIDS" ]; then
-            local STATS=$(ps -o rss= -p $PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
-            local COUNT=$(echo "$STATS" | cut -d'|' -f1)
-            local MEM=$(echo "$STATS" | cut -d'|' -f2)
-            echo "🔪 Killing $COUNT $label processes (Reclaiming ~$MEM MB)..."
-            echo "$PIDS" | xargs kill 2>/dev/null
-        else
-            echo "✅ No $label processes found."
-        fi
+        kill_and_report "$PIDS" "$label processes"
     }
 
-    # 執行各項深度清理
-    cleanup_by_name "kotlinLsp" "Kotlin LSP" "kotlinLsp"
-    cleanup_by_name "gradle" "Gradle Daemon" "org.gradle.launcher.daemon"
-    cleanup_by_name "flutter_daemon" "Flutter Daemon" "flutter_tools.snapshot daemon"
-    cleanup_by_name "xcodebuild" "Stuck xcodebuild" "xcodebuild"
+    # 跨平台通用的深度清理 (Android, Java, Flutter 等)
+    cleanup_by_name "Kotlin LSP" "kotlinLsp"
+    cleanup_by_name "Gradle Daemon" "org.gradle.launcher.daemon"
+    cleanup_by_name "Flutter Daemon" "flutter_tools.snapshot daemon"
+    cleanup_by_name "Stuck xcodebuild" "xcodebuild"
     
     # macOS 專用的 iOS 模擬器清理
-    if command -v xcrun &> /dev/null; then
+    if [ "$OS" == "Darwin" ] && command -v xcrun &> /dev/null; then
         SIM_PIDS=$(ps aux | grep -E 'CoreSimulator|Simulator.app' | grep -v grep | awk '{print $2}' | xargs)
         if [ -n "$SIM_PIDS" ]; then
             S_STATS=$(ps -o rss= -p $SIM_PIDS 2>/dev/null | awk '{sum+=$1; count++} END {printf "%d|%.2f", count, sum/1024}')
@@ -70,5 +89,5 @@ if [ "$1" == "--deep" ]; then
     echo "✅ Deep cleanup completed."
 else
     echo ""
-    echo "💡 Tip: Run 'clean-orphans --deep' to also kill Kotlin LSP, Gradle Daemons, and iOS Simulators."
+    echo "💡 Tip: Run 'clean-orphans --deep' to also kill heavy background processes like Gradle, Kotlin LSP, and iOS Simulators."
 fi
