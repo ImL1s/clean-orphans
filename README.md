@@ -185,5 +185,11 @@ Then run `./install.sh` again to apply the changes globally.
 
 Pull requests are welcome! If you know of other development tools that frequently leave orphaned background processes, feel free to open a PR to add them to the default regex patterns.
 
+---
+
+## Support
+
+If this project saved you some time, you can [buy me a coffee](https://buymeacoffee.com/iml1s).
+
 ## License
 This project is licensed under the MIT License.
